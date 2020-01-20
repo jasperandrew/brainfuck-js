@@ -91,6 +91,7 @@ class BrainfuckInterpreter extends StringStream {
         super(code);
         this.memory = new MemoryTape();
         this.status = 'stopped';
+        this.render_steps = false;
 
         this.op = {
             '>': () => {
@@ -157,23 +158,41 @@ class BrainfuckInterpreter extends StringStream {
     setCode(code) { this.setStream(code); }
 
     // BrainfuckInterpreter methods
-    run(n=Infinity) {
+    run(r=false, ms=100) {
         if(this.status === 'running') return;
         if(this.end()) this.reset();
         this.status = 'running';
-        while(n-- > 0 && !this.end()){
-            let s = this.step();
-            if(s > 0){
-                switch(s){
-                    case 1: this.status = 'stopped'; break; // Parse error
-                    case 2: this.status = 'waiting'; break; // Waiting for input
+        this.render_steps = false;
+        if(r){
+            this.render_steps = true;
+            let int_id = window.setInterval(() => {
+                let s = this.step();
+                if(s > 0){
+                    switch(s){
+                        case 1: this.status = 'stopped'; break; // Parse error
+                        case 2: this.status = 'waiting'; break; // Waiting for input
+                    }
+                    window.clearInterval(int_id);
                 }
-                break;
+                UI.render();
+                if(this.end() || (['stopped','waiting'].indexOf(this.status) > -1)){
+                    window.clearInterval(int_id);
+                }
+            }, ms);
+        }else{
+            while(!this.end()){
+                let s = this.step();
+                if(s > 0){
+                    switch(s){
+                        case 1: this.status = 'stopped'; break; // Parse error
+                        case 2: this.status = 'waiting'; break; // Waiting for input
+                    }
+                }
+                if(['stopped','waiting'].indexOf(this.status) > -1) break;
             }
+            if(this.status === 'running') this.status = 'stopped';
+            UI.render();
         }
-        if(this.status === 'running') this.status = 'stopped';
-        console.log(this.status);
-        UI.render();
     }
 
     step(r=false) {
@@ -187,7 +206,13 @@ class BrainfuckInterpreter extends StringStream {
         return 0;
     }
 
+    stop() {
+        this.status = 'stopped';
+    }
+
     reset() {
+        this.stop();
+        this.memory = new MemoryTape();
         this.status = 'stopped';
         this.pos = 0;
     }
@@ -197,19 +222,22 @@ class BrainfuckInterpreter extends StringStream {
 const BFI = new BrainfuckInterpreter();
 
 const UI = {
-    tape_len: 20,
+    cell_size: 60, //px
     tape: [],
     output: [],
     input: [],
 
-    code_elem: document.querySelector('#code'),
-    input_elem: document.querySelector('#input'),
+    code_elem: document.querySelector('#code > textarea'),
+    input_elem: document.querySelector('#input > textarea'),
     output_elem: document.querySelector('#output'),
     tape_elem: document.querySelector('#tape'),
     cell_elems: [],
 
     init() {
-        for(let i = 0; i <= this.tape_len; i++){
+        let w = Math.max(document.documentElement.clientWidth, window.innerWidth || 0) - 40;
+        let num_cells = Math.floor(w/this.cell_size);
+        if(num_cells % 2 === 1) num_cells--;
+        for(let i = 0; i <= num_cells; i++){
             let cell = document.createElement('div');
             cell.classList.add('cell');
             this.tape_elem.append(cell);
@@ -228,9 +256,14 @@ const UI = {
     },
 
     updateTape() {
-        let j = (-1 * this.tape_len/2) + BFI.memory.pos;
+        let j = BFI.memory.pos - this.tape_len/2;
         for(let i = 0; i <= this.tape_len; i++){
-            this.tape[i] = BFI.memory.tape[j++] | 0;
+            let val = BFI.memory.tape[j] | 0;
+            this.tape[i] = {
+                value: val,
+                ascii: String.fromCharCode(val),
+                index: j++
+            };
         }
     },
 
@@ -241,7 +274,7 @@ const UI = {
     submitInput() {
         this.input = this.input.concat(this.input_elem.value.split('').map(n => n.charCodeAt(0)));
         this.input_elem.value = '';
-        if(BFI.status === 'waiting') BFI.run();
+        if(BFI.status === 'waiting') BFI.run(BFI.render_steps);
     },
     
     render() {
@@ -249,7 +282,9 @@ const UI = {
 
         this.updateTape();
         for(let i = 0; i < this.tape.length; i++){
-            this.cells[i].innerText = this.tape[i];
+            this.cells[i].innerHTML =   `<div class="ascii">${this.tape[i].ascii}</div>` +
+                                        this.tape[i].value +
+                                        `<div class="index">${this.tape[i].index}</div>`;
         }
     }
 }

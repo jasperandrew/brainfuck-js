@@ -6,14 +6,22 @@
         <link rel="stylesheet" href="style.css">
     </head>
     <body>
-        <textarea id="code"></textarea>
-        <button id="update_code" onclick="UI.updateCode()">Update</button>
-
-        <textarea id="input"></textarea>
-        <button id="submit_input" onclick="UI.submitInput()">Submit</button>
-
-        <div id="output"></div>
         <div id="tape"></div>
+        <div id="main">
+            <div id="code">
+                <textarea></textarea>
+            </div>
+            <div id="input">
+                <div></div>
+                <textarea></textarea>
+            </div>
+            <div id="output"></div>
+        </div>
+        <div id="controls">
+            <button id="update_code" onclick="UI.updateCode()">Update</button>
+            <button id="submit_input" onclick="UI.submitInput()">Submit</button>
+        </div>
+
         
         <script src="brainfuck.js"></script>
     </body>
