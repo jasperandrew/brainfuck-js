@@ -56,6 +56,10 @@ class MemoryTape {
 
 class StringStream {
     constructor(input) {
+        this.setStream(input);
+    }
+
+    setStream(input) {
         this.stream = input.toString();
         this.pos = 0;
     }
@@ -83,20 +87,38 @@ class StringStream {
 }
 
 class BrainfuckInterpreter extends StringStream {
-    constructor(code, input=null, output=null) {
+    constructor(code='') {
         super(code);
         this.memory = new MemoryTape();
-        this.input = input;
-        this.output = output;
-        this.outstr = '';
+        this.status = 'stopped';
 
         this.op = {
-            '>': () => { this.memory.fwd(); },
-            '<': () => { this.memory.bwd(); },
-            '+': () => { this.memory.inc(); },
-            '-': () => { this.memory.dec(); },
-            '.': () => { this.putOutput(this.memory.get()); },
-            ',': () => { this.memory.put(this.getInput()); },
+            '>': () => {
+                this.memory.fwd();
+                return 0;
+            },
+            '<': () => {
+                this.memory.bwd();
+                return 0;
+            },
+            '+': () => {
+                this.memory.inc();
+                return 0;
+            },
+            '-': () => {
+                this.memory.dec();
+                return 0;
+            },
+            '.': () => {
+                UI.putOutput(this.memory.get());
+                return 0;
+            },
+            ',': () => {
+                let input = UI.getInput();
+                if(!input) return 2;
+                this.memory.put(input);
+                return 0;
+            },
             '[': () => {
                 if(this.memory.get() === 0){
                     this.next();
@@ -109,6 +131,7 @@ class BrainfuckInterpreter extends StringStream {
                         char = this.get();
                     }
                 }
+                return 0;
             },
             ']': () => {
                 if(this.memory.get() !== 0){
@@ -122,42 +145,113 @@ class BrainfuckInterpreter extends StringStream {
                         char = this.get();
                     }
                 }
+                return 0;
             }
         }
     }
 
-    // Override
-    get() {
-        return this.stream.substring(this.pos, this.pos+1);
-    }
-
+    // StringStream overrides/aliases
+    get() { return this.stream.substring(this.pos, this.pos+1); }
     next() { this.skip(); }
     prev() { this.rewind(); }
+    setCode(code) { this.setStream(code); }
 
+    // BrainfuckInterpreter methods
     run(n=Infinity) {
+        if(this.status === 'running') return;
+        if(this.end()) this.reset();
+        this.status = 'running';
         while(n-- > 0 && !this.end()){
-            this.step();
-            this.render();
+            let s = this.step();
+            if(s > 0){
+                switch(s){
+                    case 1: this.status = 'stopped'; break; // Parse error
+                    case 2: this.status = 'waiting'; break; // Waiting for input
+                }
+                break;
+            }
         }
+        if(this.status === 'running') this.status = 'stopped';
+        console.log(this.status);
+        UI.render();
     }
 
-    step() {
-        // console.log(this.get());
+    step(r=false) {
         let cmd = this.op[this.get()];
-        if(cmd) cmd();
+        if(cmd){
+            let c = cmd();
+            if(c > 0) return c;
+        }
         this.next();
+        if(r) UI.render();
+        return 0;
     }
 
-    putOutput(x) {
-        this.outstr += String.fromCharCode(x);
-        console.log(this.outstr);
-    }
-
-    getInput() {
-        return prompt('Input char').charCodeAt(0);
-    }
-
-    render() {
-        
+    reset() {
+        this.status = 'stopped';
+        this.pos = 0;
     }
 }
+
+// Run stuff
+const BFI = new BrainfuckInterpreter();
+
+const UI = {
+    tape_len: 20,
+    tape: [],
+    output: [],
+    input: [],
+
+    code_elem: document.querySelector('#code'),
+    input_elem: document.querySelector('#input'),
+    output_elem: document.querySelector('#output'),
+    tape_elem: document.querySelector('#tape'),
+    cell_elems: [],
+
+    init() {
+        for(let i = 0; i <= this.tape_len; i++){
+            let cell = document.createElement('div');
+            cell.classList.add('cell');
+            this.tape_elem.append(cell);
+        }
+        this.cells = document.querySelectorAll('#tape > .cell');
+        this.render();
+    },
+
+    putOutput(x) {
+        this.output.push(x);
+    },
+
+    getInput() {
+        if(this.input.length === 0) return null;
+        return this.input.shift();
+    },
+
+    updateTape() {
+        let j = (-1 * this.tape_len/2) + BFI.memory.pos;
+        for(let i = 0; i <= this.tape_len; i++){
+            this.tape[i] = BFI.memory.tape[j++] | 0;
+        }
+    },
+
+    updateCode() {
+        BFI.setCode(this.code_elem.value);
+    },
+
+    submitInput() {
+        this.input = this.input.concat(this.input_elem.value.split('').map(n => n.charCodeAt(0)));
+        this.input_elem.value = '';
+        if(BFI.status === 'waiting') BFI.run();
+    },
+    
+    render() {
+        this.output_elem.innerText = this.output.map(n => String.fromCharCode(n)).join('');
+
+        this.updateTape();
+        for(let i = 0; i < this.tape.length; i++){
+            this.cells[i].innerText = this.tape[i];
+        }
+    }
+}
+
+UI.init();

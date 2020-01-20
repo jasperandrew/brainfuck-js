@@ -1,0 +1,26 @@
+#code, #input, #output {
+    display: inline-block;
+    width: 20vw;
+    /* border: 1px solid grey; */
+}
+
+#code {
+    height: 70vh;
+}
+
+#input {
+    height: 50vh;
+}
+
+#output {
+    height: 70vh;
+}
+
+button {
+    display: inline-block;
+}
+
+#tape > .cell {
+    display: inline-block;
+    padding: 5px;
+}
