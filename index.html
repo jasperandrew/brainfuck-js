@@ -6,23 +6,33 @@
         <link rel="stylesheet" href="style.css">
     </head>
     <body>
-        <div id="tape"></div>
+        <div id="top">
+            <div id="tape"></div>
+            <div id="queue"></div>
+        </div>
         <div id="main">
-            <div id="code">
-                <textarea></textarea>
+            <div id="edit">
+                <div id="code" contenteditable spellcheck="false" oninput="UI.setCodeStream()"></div>
             </div>
-            <div id="input">
-                <div></div>
-                <textarea></textarea>
+            <div id="io">
+                <div id="io_top">
+                    <textarea id="input" placeholder="Input goes here (submit to add one or more values to the input queue)"></textarea>
+                    <button id="submit_input" onclick="UI.submitInput()">↩</button>
+                    <div id="status"></div>
+                    <button id="reset_code" onclick="UI.resetCode()">↺</button>
+                    <button id="step_code" onclick="UI.stepCode()">»</button>
+                    <button id="run_code" onclick="UI.runPauseCode()">▶️<span>❚❚</span></button>
+                </div>
+                <div id="output">
+                    <span>Output will go here</span>
+                </div>
             </div>
-            <div id="output"></div>
         </div>
         <div id="controls">
-            <button id="update_code" onclick="UI.updateCode()">Update</button>
-            <button id="submit_input" onclick="UI.submitInput()">Submit</button>
+            
         </div>
-
         
         <script src="brainfuck.js"></script>
+        <script>UI.init();</script>
     </body>
 </html>

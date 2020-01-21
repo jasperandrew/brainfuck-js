@@ -88,10 +88,11 @@ class StringStream {
 
 class BrainfuckInterpreter extends StringStream {
     constructor(code='') {
-        super(code);
+        super('');
+        this.setStream(code);
         this.memory = new MemoryTape();
         this.status = 'stopped';
-        this.render_steps = false;
+        this.op_chrs = '+-<>[],.';
 
         this.op = {
             '>': () => {
@@ -153,56 +154,61 @@ class BrainfuckInterpreter extends StringStream {
 
     // StringStream overrides/aliases
     get() { return this.stream.substring(this.pos, this.pos+1); }
+    find() {
+        let chr = this.get();
+        // console.log(this.op_chrs.indexOf(chr), chr);
+        while(this.op_chrs.indexOf(chr) === -1){
+            this.next();
+            chr = this.get();
+        }
+        return chr;
+    }
     next() { this.skip(); }
     prev() { this.rewind(); }
-    setCode(code) { this.setStream(code); }
 
     // BrainfuckInterpreter methods
-    run(r=false, ms=100) {
+    handleRetCode(c) {
+        switch(c){
+            case -1: this.status = 'stopped'; break; // Parse error
+            case 1:  this.status = 'complete'; break; // Completed
+            case 2:  this.status = 'waiting'; break; // Waiting for input
+        }
+    }
+
+    run(ms=0) {
         if(this.status === 'running') return;
         if(this.end()) this.reset();
         this.status = 'running';
-        this.render_steps = false;
-        if(r){
-            this.render_steps = true;
+        if(ms > 0){
             let int_id = window.setInterval(() => {
-                let s = this.step();
-                if(s > 0){
-                    switch(s){
-                        case 1: this.status = 'stopped'; break; // Parse error
-                        case 2: this.status = 'waiting'; break; // Waiting for input
-                    }
-                    window.clearInterval(int_id);
-                }
-                UI.render();
-                if(this.end() || (['stopped','waiting'].indexOf(this.status) > -1)){
+                let s = this.step(true);
+                if(s !== 0) window.clearInterval(int_id);
+                if(this.end() || (['stopped','waiting','paused'].indexOf(this.status) > -1)){
                     window.clearInterval(int_id);
                 }
             }, ms);
         }else{
             while(!this.end()){
-                let s = this.step();
-                if(s > 0){
-                    switch(s){
-                        case 1: this.status = 'stopped'; break; // Parse error
-                        case 2: this.status = 'waiting'; break; // Waiting for input
-                    }
-                }
-                if(['stopped','waiting'].indexOf(this.status) > -1) break;
+                this.step();
+                if(['stopped','waiting','paused'].indexOf(this.status) > -1) break;
             }
             if(this.status === 'running') this.status = 'stopped';
             UI.render();
         }
     }
 
-    step(r=false) {
-        let cmd = this.op[this.get()];
+    step(r=false, s=false) {
+        if(r) UI.render();
+        let cmd = this.op[this.find()];
         if(cmd){
             let c = cmd();
-            if(c > 0) return c;
+            if(c !== 0){
+                this.handleRetCode(c);
+                return c;
+            }
         }
         this.next();
-        if(r) UI.render();
+        if(s) this.pause();
         return 0;
     }
 
@@ -210,10 +216,13 @@ class BrainfuckInterpreter extends StringStream {
         this.status = 'stopped';
     }
 
+    pause() {
+        this.status = 'paused';
+    }
+
     reset() {
         this.stop();
         this.memory = new MemoryTape();
-        this.status = 'stopped';
         this.pos = 0;
     }
 }
@@ -223,26 +232,35 @@ const BFI = new BrainfuckInterpreter();
 
 const UI = {
     cell_size: 60, //px
+    num_cells: 0,
     tape: [],
     output: [],
     input: [],
+    speed: 50,
 
-    code_elem: document.querySelector('#code > textarea'),
-    input_elem: document.querySelector('#input > textarea'),
-    output_elem: document.querySelector('#output'),
-    tape_elem: document.querySelector('#tape'),
-    cell_elems: [],
+    elems: {
+        tape: document.querySelector('#tape'),
+        queue: document.querySelector('#queue'),
+        code: document.querySelector('#code'),
+        input: document.querySelector('#input'),
+        output: document.querySelector('#output'),
+        status: document.querySelector('#status')
+    },
+
+    examples : {},
 
     init() {
         let w = Math.max(document.documentElement.clientWidth, window.innerWidth || 0) - 40;
-        let num_cells = Math.floor(w/this.cell_size);
-        if(num_cells % 2 === 1) num_cells--;
-        for(let i = 0; i <= num_cells; i++){
+        this.num_cells = Math.floor(w/this.cell_size);
+        if(this.num_cells % 2 === 1) this.num_cells--;
+        for(let i = 0; i <= this.num_cells; i++){
             let cell = document.createElement('div');
             cell.classList.add('cell');
-            this.tape_elem.append(cell);
+            this.elems.tape.append(cell);
         }
         this.cells = document.querySelectorAll('#tape > .cell');
+        this.elems.code.innerHTML = UI.examples.helloworld;
+        UI.setCodeStream();
         this.render();
     },
 
@@ -252,12 +270,12 @@ const UI = {
 
     getInput() {
         if(this.input.length === 0) return null;
-        return this.input.shift();
+        return this.input.shift().value;
     },
 
     updateTape() {
-        let j = BFI.memory.pos - this.tape_len/2;
-        for(let i = 0; i <= this.tape_len; i++){
+        let j = BFI.memory.pos - (this.num_cells)/2;
+        for(let i = 0; i <= this.num_cells; i++){
             let val = BFI.memory.tape[j] | 0;
             this.tape[i] = {
                 value: val,
@@ -267,26 +285,213 @@ const UI = {
         }
     },
 
-    updateCode() {
-        BFI.setCode(this.code_elem.value);
+    setCodeStream() {
+        if(this.elems.code.innerText.trim() === '') this.elems.code.classList.add('empty');
+        else this.elems.code.classList.remove('empty');
+        BFI.setStream(this.elems.code.innerText);
     },
 
     submitInput() {
-        this.input = this.input.concat(this.input_elem.value.split('').map(n => n.charCodeAt(0)));
-        this.input_elem.value = '';
+        this.input = this.input.concat(this.elems.input.value.split('')
+                        .map(n => {
+                            return {
+                                value: n.charCodeAt(0),
+                                ascii: n
+                            }
+                        }));
+        this.elems.input.value = '';
         if(BFI.status === 'waiting') BFI.run(BFI.render_steps);
+        this.render();
+    },
+
+    runPauseCode() {
+        switch(BFI.status){
+            case 'paused':
+            case 'stopped': BFI.run(this.speed); break;
+            case 'running': BFI.pause(); break;
+            default:
+        }
+    },
+
+    switchAscii() {
+        this.elems.tape.classList.toggle('switched');
+        this.elems.queue.classList.toggle('switched');
+    },
+
+    resetCode() {
+        BFI.reset();
+        this.output = [];
+        this.render();
+    },
+
+    stepCode() {
+        BFI.step(true, true);
     },
     
     render() {
-        this.output_elem.innerText = this.output.map(n => String.fromCharCode(n)).join('');
+        let codedata = this.elems.code.innerText.split('');
+        if('runningpaused'.indexOf(BFI.status) > -1) codedata[BFI.pos-1] = '<span>'+codedata[BFI.pos-1]+'</span>';
+        this.elems.code.innerHTML = codedata.join('');
 
         this.updateTape();
         for(let i = 0; i < this.tape.length; i++){
             this.cells[i].innerHTML =   `<div class="ascii">${this.tape[i].ascii}</div>` +
-                                        this.tape[i].value +
+                                        `<div class="value">${this.tape[i].value}</div>` +
                                         `<div class="index">${this.tape[i].index}</div>`;
         }
+        
+        this.elems.queue.innerHTML = '';
+        for(let i = 0; i < this.input.length; i++){
+            this.elems.queue.innerHTML +=`<div class="char">` +
+                                            `<div class="value">${this.input[i].value}</div>` +
+                                            `<div class="ascii">${this.input[i].ascii}</div>` +
+                                        `</div>`;
+        }
+
+        if(this.output.length === 0){
+            this.elems.output.innerHTML = '<span>Output will go here</span>';
+        }else{
+            this.elems.output.innerText = this.output.map(n => String.fromCharCode(n)).join('');
+        }
+
+        this.elems.status.innerHTML = BFI.status;
     }
 }
 
-UI.init();
+UI.examples = {
+    helloworld:
+`[
+From wikipedia: https://en.wikipedia.org/wiki/Brainfuck#Hello_World!
+
+This program prints "Hello World!" and a newline to the screen, its
+length is 106 active command characters. [It is not the shortest.]
+
+This loop is an "initial comment loop", a simple way of adding a comment
+to a BF program such that you don't have to worry about any command
+characters. Any ".", ",", "+", "-", "<" and ">" characters are simply
+ignored, the "[" and "]" characters just have to be balanced. This
+loop and the commands it contains are ignored because the current cell
+defaults to a value of 0; the 0 value causes this loop to be skipped.
+]
+++++++++               Set Cell #0 to 8
+[
+  >++++               Add 4 to Cell #1; this will always set Cell #1 to 4
+  [                   as the cell will be cleared by the loop
+      >++             Add 2 to Cell #2
+      >+++            Add 3 to Cell #3
+      >+++            Add 3 to Cell #4
+      >+              Add 1 to Cell #5
+      <<<<-           Decrement the loop counter in Cell #1
+  ]                   Loop till Cell #1 is zero; number of iterations is 4
+  >+                  Add 1 to Cell #2
+  >+                  Add 1 to Cell #3
+  >-                  Subtract 1 from Cell #4
+  >>+                 Add 1 to Cell #6
+  [<]                 Move back to the first zero cell you find; this will
+                      be Cell #1 which was cleared by the previous loop
+  <-                  Decrement the loop Counter in Cell #0
+]                       Loop till Cell #0 is zero; number of iterations is 8
+
+The result of this is:
+Cell No :   0   1   2   3   4   5   6
+Contents:   0   0  72 104  88  32   8
+Pointer :   ^
+
+>>.                     Cell #2 has value 72 which is 'H'
+>---.                   Subtract 3 from Cell #3 to get 101 which is 'e'
++++++++..+++.           Likewise for 'llo' from Cell #3
+>>.                     Cell #5 is 32 for the space
+<-.                     Subtract 1 from Cell #4 for 87 to give a 'W'
+<.                      Cell #3 was set to 'o' from the end of 'Hello'
++++.------.--------.    Cell #3 for 'rl' and 'd'
+>>+.                    Add 1 to Cell #5 gives us an exclamation point
+>++.                    And finally a newline from Cell #6`,
+
+    tictactoe:
+`    +>-[>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>++[-]->>>>+>>>+>>>+>>>+>>>+>    
+>>+>>>+>>>+>>>++[-<+]-<<<<+<<++++[->++++++++<]<++[------>+<]>++<<+[--->++<]>++ 
+<<-[--->+<]>------<+[-<+]-<[>>+[->+]-<[-]<<[-]+++[>[-]++++++++++.[-]+++[>+[>>+<<
+-]>>[<<++[-<+]->++[->+]->-]<<+[-<+]->-[-[-[-[-[-[-[-[->>>]>>>]>>>]>>>]>>>]>>>]>>
+>]>>>]>>>>>>>>>>>>>>>>>>>>> > > > > > > > > > > > > >>>>>>>>>>[+[-<+]-<<<<<<.>>>
+>>>>]>[+[-<+]-<<<<                                            <<<.>>>>>>>>]>[+[-
+<+]-<<<<<<<<.>>>                  tic tac toe                   >>>>>>]+[-<+]-<<
+<<<.>>>-]<-]+++       to play: type a number (1 to 9) to         +++++++.[-]<<<<
+<<[<<<<<<<<<<<+        place an X at that grid location          [--->++<]>+++.[
+->+++++++<]>.++                                                  ++++.-[---->+<]
+>+++.---[->+++<]           [  http://mitxela.com/  ]            >.+++[->++++<]>+
+.+++++.-[->+++++<]                                            >.[--->+<]>-.+[-<+
+]-<[-]>>>>]<[<<<<<<<++++[++++>---<]>+.[++++>---<]>-.+++[->+++<]>++.+[--->+<]>+.+
+[---->+<]>+++.[--->+<]>-.[-]+[-<+]-<[-]>>>>]<[<<<<<<<<<<+[--->++<]>+++.[->++++++
++<]>.++++++.-[---->+<]>+++.++++++[->++<]>.+[--->+<]>.++++.++++[->+++<]>.--[--->+
+<]>.[--->+<]>-.+[-<+]-<[-]>>>>]<+[-<+]-<[>>->>>>>>+[-<<<<[-]<<[-]>>>>-[>>[-]+<<+
+<[-]<[-]<[-]<[-]-[----->+<]>---<,>[-<->]<[>>+>+<<<-]>>[<<+>>-]+++++++++[->-[<<]>
+]>>-]<<<<[-]>>>>[-]+<<<<<<[>>+>+<<<-]>>[<<+>>-]>>]>>-<<<[-]<<[<->-]<-[-[-[-[-[-[
+-[-[->>>]>>>]>>>]>>>]>>>]>>>]>>>]>>>]]>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>[->++[-<+]->>>>>[>>>[>>>[+[-<+]-<<<<<<<<<[-]++[->+]->]]]+[-<+]->>>>>>>>>>>>>>[>
+>>[>>>[+[-<+]-<<<<<<<<<[-]++[->+]->]]]+[-<+]->>>>>>>>>>>>>>>>>>>>>>>[>>>[>>>[+[-
+<+]-<<<<<<<<<[-]++[->+]->]]]+[-<+]->>>>>[>>>>>>>>>[>>>>>>>>>[+[-<+]-<<<<<<<<<[-]
+++[->+]->]]]+[-<+]->>>>>>>>[>>>>>>>>>[>>>>>>>>>[+[-<+]-<<<<<<<<<[-]++[->+]->]]]+
+[-<+]->>>>>>>>>>>[>>>>>>>>>[>>>>>>>>>[+[-<+]-<<<<<<<<<[-]++[->+]->]]]+[-<+]->>>>
+>[>>>>>>>>>>>>[>>>>>>>>>>>>[+[-<+]-<<<<<<<<<[-]++[->+]->]]]+[-<+]->>>>>>>>>>>[>>
+>>>>[>>>>>>[+[-<+]-<<<<<<<<<[-]++[->+]->]]]+[-<+]-<<<<<<<<<-[++[->+]-<<<<<<<<<<[
+-]++[->+]->>>>[+[-<+]-<<<<<<<<<<[-]+[->+]->]+[-<+]->>>>>>>[+[-<+]-<<<<<<<<<<[-]+
+[->+]->]+[-<+]->>>>>>>>>>[+[-<+]-<<<<<<<<<<[-]+[->+]->]+[-<+]->>>>>>>>>>>>>[+[-<
++]-<<<<<<<<<<[-]+[->+]->]+[-<+]->>>>>>>>>>>>>>>>[+[-<+]-<<<<<<<<<<[-]+[->+]->]+[
+-<+]->>>>>>>>>>>>>>>>>>>[+[-<+]-<<<<<<<<<<[-]+[->+]->]+[-<+]->>>>>>>>>>>>>>>>>>>
+>>>[+[-<+]-<<<<<<<<<<[-]+[->+]->]+[-<+]->>>>>>>>>>>>>>>>>>>>>>>>>[+[-<+]-<<<<<<<
+<<<[-]+[->+]->]+[-<+]->>>>>>>>>>>>>>>>>>>>>>>>>>>>[+[-<+]-<<<<<<<<<<[-]+[->+]->]
++[-<+]-<<[-]>[-]+>>>>>>[>>>[>>[+[-<+]-<[-]<[-]++++[->+]->]]]>+[-<+]->>>>>[>>[>>>
+>[+[-<+]-<[-]<[-]+++[->+]->]]]>+[-<+]->>>>[>>>>[>>>[+[-<+]-<[-]<[-]++[->+]->]]]>
++[-<+]->>>>>>>>>>>>>>[>>>[>>[+[-<+]-<[-]<[-]+++++++[->+]->]]]>+[-<+]->>>>>>>>>>>
+>>>[>>[>>>>[+[-<+]-<[-]<[-]++++++[->+]->]]]>+[-<+]->>>>>>>>>>>>>[>>>>[>>>[+[-<+]
+-<[-]<[-]+++++[->+]->]]]>+[-<+]->>>>>>>>>>>>>>>>>>>>>>>[>>>[>>[+[-<+]-<[-]<[-]++
+++++++++[->+]->]]]>+[-<+]->>>>>>>>>>>>>>>>>>>>>>>[>>[>>>>[+[-<+]-<[-]<[-]+++++++
+++[->+]->]]]>+[-<+]->>>>>>>>>>>>>>>>>>>>>>[>>>>[>>>[+[-<+]-<[-]<[-]++++++++[->+]
+->]]]>+[-<+]->>>>>[>>>>>>>>>[>>>>>>>>[+[-<+]-<[-]<[-]++++++++[->+]->]]]>+[-<+]->
+>>>>[>>>>>>>>[>>>>>>>>>>[+[-<+]-<[-]<[-]+++++[->+]->]]]>+[-<+]->>>>[>>>>>>>>>>[>
+>>>>>>>>[+[-<+]-<[-]<[-]++[->+]->]]]>+[-<+]->>>>>>>>[>>>>>>>>>[>>>>>>>>[+[-<+]-<
+[-]<[-]+++++++++[->+]->]]]>+[-<+]->>>>>>>>[>>>>>>>>[>>>>>>>>>>[+[-<+]-<[-]<[-]++
+++++[->+]->]]]>+[-<+]->>>>>>>[>>>>>>>>>>[>>>>>>>>>[+[-<+]-<[-]<[-]+++[->+]->]]]>
++[-<+]->>>>>>>>>>>[>>>>>>>>>[>>>>>>>>[+[-<+]-<[-]<[-]++++++++++[->+]->]]]>+[-<+]
+->>>>>>>>>>>[>>>>>>>>[>>>>>>>>>>[+[-<+]-<[-]<[-]+++++++[->+]->]]]>+[-<+]->>>>>>>
+>>>[>>>>>>>>>>[>>>>>>>>>[+[-<+]-<[-]<[-]++++[->+]->]]]>+[-<+]->>>>>[>>>>>>>>>>>>
+[>>>>>>>>>>>[+[-<+]-<[-]<[-]++++++++++[->+]->]]]>+[-<+]->>>>[>>>>>>>>>>>>>[>>>>>
+>>>>>>>[+[-<+]-<[-]<[-]++[->+]->]]]>+[-<+]->>>>>>>>>>>[>>>>>>[>>>>>[+[-<+]-<[-]<
+[-]++++++++[->+]->]]]>+[-<+]->>>>>>>>>>[>>>>>>>[>>>>>>[+[-<+]-<[-]<[-]++++[->+]-
+>]]]>+[-<+]->>>>>>[>>>[>[+[-<+]-<[-]<[-]++++[->+]->]]]>+[-<+]->>>>>>[>[>>>>>[+[-
+<+]-<[-]<[-]+++[->+]->]]]>+[-<+]->>>>[>>>>>[>>>[+[-<+]-<[-]<[-]++[->+]->]]]>+[-<
++]->>>>>>>>>>>>>>>[>>>[>[+[-<+]-<[-]<[-]+++++++[->+]->]]]>+[-<+]->>>>>>>>>>>>>>>
+[>[>>>>>[+[-<+]-<[-]<[-]++++++[->+]->]]]>+[-<+]->>>>>>>>>>>>>[>>>>>[>>>[+[-<+]-<
+[-]<[-]+++++[->+]->]]]>+[-<+]->>>>>>>>>>>>>>>>>>>>>>>>[>>>[>[+[-<+]-<[-]<[-]++++
+++++++[->+]->]]]>+[-<+]->>>>>>>>>>>>>>>>>>>>>>>>[>[>>>>>[+[-<+]-<[-]<[-]++++++++
++[->+]->]]]>+[-<+]->>>>>>>>>>>>>>>>>>>>>>[>>>>>[>>>[+[-<+]-<[-]<[-]++++++++[->+]
+->]]]>+[-<+]->>>>>>[>>>>>>>>>[>>>>>>>[+[-<+]-<[-]<[-]++++++++[->+]->]]]>+[-<+]->
+>>>>>[>>>>>>>[>>>>>>>>>>>[+[-<+]-<[-]<[-]+++++[->+]->]]]>+[-<+]->>>>[>>>>>>>>>>>
+[>>>>>>>>>[+[-<+]-<[-]<[-]++[->+]->]]]>+[-<+]->>>>>>>>>[>>>>>>>>>[>>>>>>>[+[-<+]
+-<[-]<[-]+++++++++[->+]->]]]>+[-<+]->>>>>>>>>[>>>>>>>[>>>>>>>>>>>[+[-<+]-<[-]<[-
+]++++++[->+]->]]]>+[-<+]->>>>>>>[>>>>>>>>>>>[>>>>>>>>>[+[-<+]-<[-]<[-]+++[->+]->
+]]]>+[-<+]->>>>>>>>>>>>[>>>>>>>>>[>>>>>>>[+[-<+]-<[-]<[-]++++++++++[->+]->]]]>+[
+-<+]->>>>>>>>>>>>[>>>>>>>[>>>>>>>>>>>[+[-<+]-<[-]<[-]+++++++[->+]->]]]>+[-<+]->>
+>>>>>>>>[>>>>>>>>>>>[>>>>>>>>>[+[-<+]-<[-]<[-]++++[->+]->]]]>+[-<+]->>>>>>[>>>>>
+>>>>>>>[>>>>>>>>>>[+[-<+]-<[-]<[-]++++++++++[->+]->]]]>+[-<+]->>>>[>>>>>>>>>>>>>
+>[>>>>>>>>>>>>[+[-<+]-<[-]<[-]++[->+]->]]]>+[-<+]->>>>>>>>>>>>[>>>>>>[>>>>[+[-<+
+]-<[-]<[-]++++++++[->+]->]]]>+[-<+]->>>>>>>>>>[>>>>>>>>[>>>>>>[+[-<+]-<[-]<[-]++
+++[->+]->]]]>+[-<+]-<[>>+[-<+]->>>>>>>>>>>>>>>>>>>>>>>>>>>>[+[-<+]-<[-]<[-]+++++
++++++[->+]->]+[-<+]->>>>>>>>>>>>>>>>>>>>>>[+[-<+]-<[-]<[-]++++++++[->+]->]+[-<+]
+->>>>>>>>>>[+[-<+]-<[-]<[-]++++[->+]->]+[-<+]->>>>[+[-<+]-<[-]<[-]++[->+]->]+[-<
++]->>>>>>>>>>>>>>>>>>>>>>>>>[+[-<+]-<[-]<[-]+++++++++[->+]->]+[-<+]->>>>>>>>>>>>
+>>>>>>>[+[-<+]-<[-]<[-]+++++++[->+]->]+[-<+]->>>>>>>>>>>>>[+[-<+]-<[-]<[-]+++++[
+->+]->]+[-<+]->>>>>>>[+[-<+]-<[-]<[-]+++[->+]->]+[-<+]->>>>>>>>>>>>>>>>[+[-<+]-<
+[-]<[-]++++++[->+]->]+[-<+]->]>>+[-<+]-<<<<[+[->+]->>>>>>>>>>>>>>>>>[+[-<+]-<[-]
+<[-]++[->+]->]+[-<+]->]>>>>+[-<+]-<<[>>>+[-<+]-<[-]<[+[-<+]->++[->+]-<<-]+[-<+]-
+>-[-[-[-[-[-[-[-[->>>]>>>]>>>]>>>]>>>]>>>]>>>]>>>]>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>->>++[-<+]->]>>>>+[-<+]-<<[-]>>>+[-<+]-<<<<[-]>>>>>+[-<+]->>>>>>[>>
+>[>>>[+[-<+]-<<<<<<<<<<<[-]++[->+]->]]]+[-<+]->>>>>>>>>>>>>>>[>>>[>>>[+[-<+]-<<<
+<<<<<<<<[-]++[->+]->]]]+[-<+]->>>>>>>>>>>>>>>>>>>>>>>>[>>>[>>>[+[-<+]-<<<<<<<<<<
+<[-]++[->+]->]]]+[-<+]->>>>>>[>>>>>>>>>[>>>>>>>>>[+[-<+]-<<<<<<<<<<<[-]++[->+]->
+]]]+[-<+]->>>>>>>>>[>>>>>>>>>[>>>>>>>>>[+[-<+]-<<<<<<<<<<<[-]++[->+]->]]]+[-<+]-
+>>>>>>>>>>>>[>>>>>>>>>[>>>>>>>>>[+[-<+]-<<<<<<<<<<<[-]++[->+]->]]]+[-<+]->>>>>>[
+>>>>>>>>>>>>[>>>>>>>>>>>>[+[-<+]-<<<<<<<<<<<[-]++[->+]->]]]+[-<+]->>>>>>>>>>>>[>
+>>>>>[>>>>>>[+[-<+]-<<<<<<<<<<<[-]++[->+]->]]]+[-<+]-<[-]]++[->+]->]+[-<+]-<+[ 
+   -<+]-<]>>+[->+]->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>+[-[-]<+]-<+[-[-]<+]-<+>]    `
+};
